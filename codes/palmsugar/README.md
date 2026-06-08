@@ -1,17 +1,23 @@
-# palmsugar
+# 棕榈糖账本
 
-A new Flutter project.
+个人财务管理 Flutter App — 记录收支、导入账单、管理理财交易。
 
-## Getting Started
+## 技术栈
 
-This project is a starting point for a Flutter application.
+- **Flutter** — 跨平台移动开发框架
+- **SQLite** — 纯本地数据存储（sqflite）
 
-A few resources to get you started if this is your first Flutter project:
+## 运行
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```bash
+flutter pub get
+flutter run
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 功能
+
+- 手动记账（金额支持表达式计算）
+- 分类管理
+- 月度收支汇总
+- 答案之书
+- 账单文件导入（开发中）
