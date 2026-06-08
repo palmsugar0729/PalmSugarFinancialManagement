@@ -144,41 +144,44 @@ class _AddRecordPageState extends State<AddRecordPage> {
       appBar: AppBar(
         title: Text(_isEditing ? '编辑记录' : '记一笔'),
         actions: [
-          TextButton(
-            onPressed: _saveTransaction,
-            child: const Text(
-              '保存',
-              style: TextStyle(color: Colors.white),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton(
+              onPressed: _saveTransaction,
+              child: const Text('保存'),
             ),
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 类型选择
-                  _buildTypeSelector(),
-                  const SizedBox(height: 24),
+          : GestureDetector(
+              onTap: () => FocusScope.of(context).unfocus(),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 类型选择
+                    _buildTypeSelector(),
+                    const SizedBox(height: 24),
 
-                  // 金额输入
-                  _buildAmountInput(),
-                  const SizedBox(height: 24),
+                    // 金额输入
+                    _buildAmountInput(),
+                    const SizedBox(height: 24),
 
-                  // 日期选择
-                  _buildDateSelector(),
-                  const SizedBox(height: 24),
+                    // 日期选择
+                    _buildDateSelector(),
+                    const SizedBox(height: 24),
 
-                  // 分类选择
-                  _buildCategorySelector(),
-                  const SizedBox(height: 24),
+                    // 分类选择
+                    _buildCategorySelector(),
+                    const SizedBox(height: 24),
 
-                  // 备注输入
-                  _buildNoteInput(),
-                ],
+                    // 备注输入
+                    _buildNoteInput(),
+                  ],
+                ),
               ),
             ),
     );
@@ -231,7 +234,7 @@ class _AddRecordPageState extends State<AddRecordPage> {
           controller: _amountController,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            FilteringTextInputFormatter.allow(RegExp(r'^[\d+\-*/.]*$')),
           ],
           style: const TextStyle(
             fontSize: 32,
@@ -248,6 +251,13 @@ class _AddRecordPageState extends State<AddRecordPage> {
               vertical: 16,
             ),
           ),
+          onEditingComplete: () {
+            final result = _evaluateExpression(_amountController.text);
+            if (result != null) {
+              _amountController.text = result.toStringAsFixed(2);
+            }
+            FocusScope.of(context).unfocus();
+          },
         ),
       ],
     );
@@ -358,6 +368,30 @@ class _AddRecordPageState extends State<AddRecordPage> {
         ),
       ),
     );
+  }
+
+  double? _evaluateExpression(String input) {
+    final pattern = RegExp(r'^\s*(\d+\.?\d*)\s*([\+\-\*/])\s*(\d+\.?\d*)\s*$');
+    final match = pattern.firstMatch(input);
+    if (match == null) return null;
+
+    final left = double.tryParse(match.group(1)!) ?? 0;
+    final op = match.group(2)!;
+    final right = double.tryParse(match.group(3)!) ?? 0;
+
+    switch (op) {
+      case '+':
+        return left + right;
+      case '-':
+        return left - right;
+      case '*':
+        return left * right;
+      case '/':
+        if (right == 0) return null;
+        return left / right;
+      default:
+        return null;
+    }
   }
 
   Color _getTypeColor(String type) {

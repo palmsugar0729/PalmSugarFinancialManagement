@@ -40,30 +40,38 @@ class _CategoryPageState extends State<CategoryPage>
   }
 
   Future<void> _addCategory(String type) async {
-    final controller = TextEditingController();
+    final hintMap = {
+      'expense': '例如：健身、旅游',
+      'income': '例如：工资、奖金',
+      'transfer': '例如：支付宝转微信、银行卡转账',
+    };
+
     final result = await showDialog<String?>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('添加分类'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分类名称',
-            hintText: '例如：健身、旅游',
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          title: const Text('添加分类'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: '分类名称',
+              hintText: hintMap[type] ?? '例如：健身、旅游',
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('添加'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('添加'),
+            ),
+          ],
+        );
+      },
     );
 
     if (result != null && result.trim().isNotEmpty) {
@@ -81,34 +89,34 @@ class _CategoryPageState extends State<CategoryPage>
         );
       }
     }
-
-    controller.dispose();
   }
 
   Future<void> _editCategory(models.Category category) async {
-    final controller = TextEditingController(text: category.name);
     final result = await showDialog<String?>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('编辑分类'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: '分类名称',
+      builder: (context) {
+        final controller = TextEditingController(text: category.name);
+        return AlertDialog(
+          title: const Text('编辑分类'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: '分类名称',
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
     );
 
     if (result != null && result.trim().isNotEmpty) {
@@ -116,8 +124,6 @@ class _CategoryPageState extends State<CategoryPage>
       await _db.updateCategory(updated);
       _loadCategories();
     }
-
-    controller.dispose();
   }
 
   Future<void> _deleteCategory(models.Category category) async {

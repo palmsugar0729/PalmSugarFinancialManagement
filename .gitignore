@@ -1,5 +1,8 @@
 # PalmSugar Financial Management - Root .gitignore
 
+# APK files (build artifacts)
+*.apk
+
 # Excel files (financial data, may contain sensitive info)
 *.xlsx
 *.xls
