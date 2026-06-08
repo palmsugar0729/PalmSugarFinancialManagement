@@ -98,10 +98,14 @@ class _AddRecordPageState extends State<AddRecordPage> {
       return;
     }
 
+    final now = DateTime.now();
     final dateMs = DateTime(
       _selectedDate.year,
       _selectedDate.month,
       _selectedDate.day,
+      now.hour,
+      now.minute,
+      now.second,
     ).millisecondsSinceEpoch;
 
     final transaction = models.Transaction(
@@ -397,9 +401,9 @@ class _AddRecordPageState extends State<AddRecordPage> {
   Color _getTypeColor(String type) {
     switch (type) {
       case 'expense':
-        return Colors.red;
-      case 'income':
         return Colors.green;
+      case 'income':
+        return Colors.red;
       case 'transfer':
         return Colors.blue;
       default:

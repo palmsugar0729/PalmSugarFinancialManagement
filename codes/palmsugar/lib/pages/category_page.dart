@@ -286,9 +286,9 @@ class _CategoryPageState extends State<CategoryPage>
   Color _getTypeColor(String type) {
     switch (type) {
       case 'expense':
-        return Colors.red;
-      case 'income':
         return Colors.green;
+      case 'income':
+        return Colors.red;
       case 'transfer':
         return Colors.blue;
       default:

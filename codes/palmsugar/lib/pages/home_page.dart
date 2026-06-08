@@ -99,9 +99,9 @@ class _HomePageState extends State<HomePage> {
   Color _getTypeColor(String type) {
     switch (type) {
       case 'expense':
-        return Colors.red;
-      case 'income':
         return Colors.green;
+      case 'income':
+        return Colors.red;
       case 'transfer':
         return Colors.blue;
       default:
@@ -149,7 +149,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PalmSugar 记账'),
+        title: const Text('棕榈糖账本'),
         actions: [
           IconButton(
             icon: const Icon(Icons.category),
