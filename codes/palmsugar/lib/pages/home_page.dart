@@ -324,9 +324,9 @@ class _HomePageState extends State<HomePage> {
                 onHorizontalDragEnd: (details) {
                   if (details.primaryVelocity == null) return;
                   if (details.primaryVelocity! > 200) {
-                    _goToNextMonth();
-                  } else if (details.primaryVelocity! < -200) {
                     _goToPreviousMonth();
+                  } else if (details.primaryVelocity! < -200) {
+                    _goToNextMonth();
                   }
                 },
                 child: SingleChildScrollView(
