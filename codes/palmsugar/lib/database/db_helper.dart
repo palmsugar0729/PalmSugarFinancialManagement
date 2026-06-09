@@ -319,6 +319,58 @@ class DatabaseHelper {
     return maps.map((m) => Answer.fromMap(m)).toList();
   }
 
+  // ==================== Import / Export Helpers ====================
+
+  /// 获取所有交易记录（不分页，用于导出）
+  Future<List<Transaction>> getAllTransactions() async {
+    final db = await database;
+    final maps = await db.query(
+      'transactions',
+      where: 'is_deleted = 0',
+      orderBy: 'date DESC, id DESC',
+    );
+    return maps.map((m) => Transaction.fromMap(m)).toList();
+  }
+
+  /// 批量插入交易记录（用于导入），返回成功条数
+  Future<int> batchInsertTransactions(List<Transaction> transactions) async {
+    final db = await database;
+    var count = 0;
+    await db.transaction((txn) async {
+      for (final t in transactions) {
+        await txn.insert('transactions', t.toMap());
+        count++;
+      }
+    });
+    return count;
+  }
+
+  /// 获取所有分类（含已删除，用于导出完整分类表）
+  Future<List<Category>> getAllCategoriesWithDeleted() async {
+    final db = await database;
+    final maps = await db.query(
+      'categories',
+      orderBy: 'type ASC, sort_order ASC, id ASC',
+    );
+    return maps.map((m) => Category.fromMap(m)).toList();
+  }
+
+  // ==================== Sort Order ====================
+
+  Future<void> updateCategorySortOrder(List<Category> categories) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (var i = 0; i < categories.length; i++) {
+        await txn.update(
+          'categories',
+          {'sort_order': i, 'updated_at': DateTime.now().millisecondsSinceEpoch},
+          where: 'id = ?',
+          whereArgs: [categories[i].id],
+        );
+      }
+    });
+  }
+
   // ==================== Close ====================
 
   Future<void> close() async {
