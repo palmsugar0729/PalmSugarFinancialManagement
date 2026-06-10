@@ -299,6 +299,51 @@ class DatabaseHelper {
     ''', [type, startDate, endDate]);
   }
 
+  /// 获取近N个月每月的收支汇总
+  Future<List<Map<String, dynamic>>> getMonthlySummary(int months) async {
+    final db = await database;
+    final now = DateTime.now();
+    final results = <Map<String, dynamic>>[];
+
+    for (var i = months - 1; i >= 0; i--) {
+      final monthDate = DateTime(now.year, now.month - i, 1);
+      final startOfMonth = DateTime(monthDate.year, monthDate.month, 1);
+      final endOfMonth = DateTime(monthDate.year, monthDate.month + 1, 0, 23, 59, 59);
+
+      final summary = await getSummary(
+        startOfMonth.millisecondsSinceEpoch,
+        endOfMonth.millisecondsSinceEpoch,
+      );
+
+      results.add({
+        'year': monthDate.year,
+        'month': monthDate.month,
+        'income': summary['income'] ?? 0.0,
+        'expense': summary['expense'] ?? 0.0,
+      });
+    }
+
+    return results;
+  }
+
+  /// 获取指定月份按日的收支汇总
+  Future<List<Map<String, dynamic>>> getDailySummary(int year, int month) async {
+    final db = await database;
+    final startOfMonth = DateTime(year, month, 1);
+    final endOfMonth = DateTime(year, month + 1, 0, 23, 59, 59);
+
+    return await db.rawQuery('''
+      SELECT
+        CAST(date / 86400000 as INTEGER) as day_bucket,
+        type,
+        COALESCE(SUM(amount), 0) as total
+      FROM transactions
+      WHERE date >= ? AND date <= ? AND is_deleted = 0
+      GROUP BY day_bucket, type
+      ORDER BY day_bucket ASC
+    ''', [startOfMonth.millisecondsSinceEpoch, endOfMonth.millisecondsSinceEpoch]);
+  }
+
   // ==================== Answer Book ====================
 
   Future<Answer?> getRandomAnswer() async {

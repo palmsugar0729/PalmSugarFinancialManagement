@@ -7,6 +7,7 @@ import 'add_record_page.dart';
 import 'category_page.dart';
 import 'answer_book_page.dart';
 import 'data_backup_page.dart';
+import 'analysis_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -294,6 +295,10 @@ class _HomePageState extends State<HomePage> {
         title: const Text('棕榈糖账本'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.calendar_month),
+            onPressed: _selectMonth,
+          ),
+          IconButton(
             icon: const Icon(Icons.category),
             onPressed: () => Navigator.push(
               context,
@@ -364,7 +369,17 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           children: [
             InkWell(
-              onTap: _selectMonth,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AnalysisPage(
+                      year: _currentYear,
+                      month: _currentMonth,
+                    ),
+                  ),
+                );
+              },
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -376,7 +391,7 @@ class _HomePageState extends State<HomePage> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(width: 4),
-                    const Icon(Icons.calendar_month, size: 18),
+                    const Icon(Icons.analytics, size: 18),
                   ],
                 ),
               ),
