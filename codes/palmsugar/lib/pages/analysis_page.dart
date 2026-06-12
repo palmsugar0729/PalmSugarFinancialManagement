@@ -362,6 +362,142 @@ class _AnalysisPageState extends State<AnalysisPage>
     );
   }
 
+  void _showCategoryTransactions({
+    required String categoryName,
+    required List<int> categoryIds,
+    required String type,
+    required MaterialColor color,
+  }) async {
+    final startOfMonth = DateTime(widget.year, widget.month, 1);
+    final endOfMonth =
+        DateTime(widget.year, widget.month + 1, 0, 23, 59, 59);
+
+    final transactions = await _db.getTransactionsByCategoryIds(
+      type: type,
+      startDate: startOfMonth.millisecondsSinceEpoch,
+      endDate: endOfMonth.millisecondsSinceEpoch,
+      categoryIds: categoryIds,
+    );
+
+    if (!mounted) return;
+
+    final totalAmount = transactions.fold<double>(
+        0, (sum, t) => sum + t.amount);
+
+    final typeLabel = type == 'expense' ? '支出' : '收入';
+    final amountColor = type == 'expense' ? Colors.green : Colors.red;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.3,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (ctx, scrollController) {
+            return Column(
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: color.shade400,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '$categoryName · $typeLabel',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '合计 ¥${totalAmount.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: amountColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (transactions.isEmpty)
+                  const Expanded(
+                    child: Center(child: Text('该分类本月暂无记录')),
+                  )
+                else
+                  Expanded(
+                    child: ListView.separated(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: transactions.length,
+                      separatorBuilder: (_, _) =>
+                          const Divider(height: 1),
+                      itemBuilder: (ctx, index) {
+                        final t = transactions[index];
+                        final date =
+                            DateTime.fromMillisecondsSinceEpoch(t.date);
+                        final dateStr =
+                            '${date.month}/${date.day}';
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          leading: Text(
+                            dateStr,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          title: Text(
+                            t.note != null && t.note!.isNotEmpty
+                                ? t.note!
+                                : '无备注',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          trailing: Text(
+                            '¥${t.amount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: amountColor,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildPieTab({
     required String title,
     required List<Map<String, dynamic>> data,
@@ -377,6 +513,7 @@ class _AnalysisPageState extends State<AnalysisPage>
 
     // 取前6个，其余合并为"其他"
     final displayData = _preparePieData(data);
+    final type = color == Colors.green ? 'expense' : 'income';
 
     final colors = [
       color.shade300,
@@ -386,6 +523,15 @@ class _AnalysisPageState extends State<AnalysisPage>
       color.shade700,
       Colors.grey.shade400,
     ];
+
+    void onCategoryTap(Map<String, dynamic> item) {
+      _showCategoryTransactions(
+        categoryName: item['category_name'] as String,
+        categoryIds: (item['category_ids'] as List<int>).cast<int>(),
+        type: type,
+        color: color,
+      );
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -428,12 +574,26 @@ class _AnalysisPageState extends State<AnalysisPage>
                 }),
                 pieTouchData: PieTouchData(
                   enabled: true,
-                  touchCallback: (event, pieTouchResponse) {},
+                  touchCallback: (event, pieTouchResponse) {
+                    if (event is FlTapUpEvent &&
+                        pieTouchResponse?.touchedSection != null) {
+                      final index =
+                          pieTouchResponse!.touchedSection!.touchedSectionIndex;
+                      if (index >= 0 && index < displayData.length) {
+                        onCategoryTap(displayData[index]);
+                      }
+                    }
+                  },
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
+          Text(
+            '点击分类查看明细',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+          ),
+          const SizedBox(height: 8),
           // 分类列表
           ...List.generate(displayData.length, (index) {
             final item = displayData[index];
@@ -450,6 +610,7 @@ class _AnalysisPageState extends State<AnalysisPage>
               percentage: percentage,
               color: itemColor,
               iconName: item['icon_name'] as String?,
+              onTap: () => onCategoryTap(item),
             );
           }),
         ],
@@ -459,12 +620,59 @@ class _AnalysisPageState extends State<AnalysisPage>
 
   List<Map<String, dynamic>> _preparePieData(
       List<Map<String, dynamic>> data) {
+    // 1. 先合并同名分类（不同 ID 但同名的分类合并统计）
+    final merged = <String, Map<String, dynamic>>{};
+    final mergedIds = <String, List<int>>{}; // 记录每个名称对应的所有 category_id
+    for (final item in data) {
+      final name = item['category_name'] as String;
+      final id = item['category_id'] as int;
+      if (merged.containsKey(name)) {
+        merged[name]!['total'] =
+            (merged[name]!['total'] as double) + (item['total'] as double);
+        mergedIds[name]!.add(id);
+      } else {
+        merged[name] = Map<String, dynamic>.from(item);
+        mergedIds[name] = [id];
+      }
+    }
+    // 按 total 降序重新排序
+    data = merged.values.toList()
+      ..sort((a, b) => ((b['total'] as num) - (a['total'] as num)).sign.toInt());
+    // 把 category_ids 存进去，供点击"其他"时查询用
+    for (final item in data) {
+      final name = item['category_name'] as String;
+      item['category_ids'] = mergedIds[name] ?? [];
+    }
+
+    // 2. ≤6 个分类直接返回
     if (data.length <= 6) return data;
 
+    // 3. 取前 5 + 其余合并为"其他"
     final top5 = data.sublist(0, 5);
     final others = data.sublist(5);
     final otherTotal = others.fold<double>(
         0, (sum, item) => sum + (item['total'] as double));
+    final otherIds = others
+        .expand((item) => (item['category_ids'] as List<int>))
+        .toList();
+
+    // 4. 检查前 5 里是否已有名为"其他"的分类
+    final existingOtherIdx =
+        top5.indexWhere((item) => item['category_name'] == '其他');
+
+    if (existingOtherIdx >= 0) {
+      // 已有"其他"分类，把溢出量合并进去
+      final existing = top5[existingOtherIdx];
+      final combined = Map<String, dynamic>.from(existing);
+      combined['total'] = (existing['total'] as double) + otherTotal;
+      combined['category_ids'] = [
+        ...(existing['category_ids'] as List<int>),
+        ...otherIds,
+      ];
+      final result = List<Map<String, dynamic>>.from(top5);
+      result[existingOtherIdx] = combined;
+      return result;
+    }
 
     return [
       ...top5,
@@ -472,6 +680,7 @@ class _AnalysisPageState extends State<AnalysisPage>
         'category_name': '其他',
         'total': otherTotal,
         'icon_name': 'more_horiz',
+        'category_ids': otherIds,
       },
     ];
   }
@@ -482,10 +691,16 @@ class _AnalysisPageState extends State<AnalysisPage>
     required double percentage,
     required Color color,
     String? iconName,
+    VoidCallback? onTap,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Row(
         children: [
           Container(
             width: 10,
@@ -536,6 +751,8 @@ class _AnalysisPageState extends State<AnalysisPage>
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }

@@ -5,7 +5,6 @@ import '../database/db_helper.dart';
 import '../database/models.dart' as models;
 import 'add_record_page.dart';
 import 'category_page.dart';
-import 'answer_book_page.dart';
 import 'data_backup_page.dart';
 import 'analysis_page.dart';
 
@@ -25,6 +24,10 @@ class _HomePageState extends State<HomePage> {
   double _monthExpense = 0.0;
   List<models.Transaction> _monthTransactions = [];
   bool _isLoading = true;
+
+  // 多选批量删除
+  bool _selectionMode = false;
+  final Set<int> _selectedIds = {};
 
   @override
   void initState() {
@@ -239,6 +242,64 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _toggleSelection(int id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+        if (_selectedIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _enterSelectionMode(int id) {
+    setState(() {
+      _selectionMode = true;
+      _selectedIds.add(id);
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      for (final t in _monthTransactions) {
+        if (t.id != null) _selectedIds.add(t.id!);
+      }
+    });
+  }
+
+  Future<void> _batchDelete() async {
+    final count = _selectedIds.length;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('批量删除'),
+        content: Text('确定删除选中的 $count 条记录吗？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      for (final id in _selectedIds.toList()) {
+        await _db.deleteTransaction(id);
+      }
+      _exitSelectionMode();
+      _loadData();
+    }
+  }
+
   Color _getTypeColor(String type) {
     switch (type) {
       case 'expense':
@@ -292,34 +353,47 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('棕榈糖账本'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.calendar_month),
-            onPressed: _selectMonth,
-          ),
-          IconButton(
-            icon: const Icon(Icons.category),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CategoryPage()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.menu_book),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const AnswerBookPage()),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.backup),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const DataBackupPage()),
-            ),
-          ),
-        ],
+        leading: _selectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelectionMode,
+              )
+            : null,
+        title: _selectionMode
+            ? Text('已选 ${_selectedIds.length} 项')
+            : const Text('棕榈糖账本'),
+        actions: _selectionMode
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.select_all),
+                  tooltip: '全选',
+                  onPressed: _selectAll,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete),
+                  onPressed: _batchDelete,
+                ),
+              ]
+            : [
+                IconButton(
+                  icon: const Icon(Icons.calendar_month),
+                  onPressed: _selectMonth,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.category),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CategoryPage()),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.backup),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const DataBackupPage()),
+                  ),
+                ),
+              ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -516,6 +590,56 @@ class _HomePageState extends State<HomePage> {
         final typeColor = _getTypeColor(t.type);
         final prefix = t.type == 'expense' ? '-' : (t.type == 'income' ? '+' : '');
 
+        final isSelected = _selectedIds.contains(t.id);
+
+        Widget tile = ListTile(
+          leading: _selectionMode
+              ? Checkbox(
+                  value: isSelected,
+                  onChanged: (_) => t.id != null ? _toggleSelection(t.id!) : null,
+                )
+              : CircleAvatar(
+                  backgroundColor: typeColor.withAlpha(30),
+                  child: Icon(
+                    _getCategoryIcon(category?.iconName),
+                    color: typeColor,
+                    size: 20,
+                  ),
+                ),
+          title: Text(
+            category?.name ?? '未知分类',
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
+          subtitle: Text(
+            '${_getTypeLabel(t.type)} · ${_formatDate(t.date)}',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          trailing: Text(
+            '$prefix${_formatAmount(t.amount)}',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: typeColor,
+            ),
+          ),
+          onTap: _selectionMode
+              ? () => t.id != null ? _toggleSelection(t.id!) : null
+              : () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddRecordPage(transaction: t),
+                    ),
+                  );
+                  _loadData();
+                },
+          onLongPress: _selectionMode
+              ? null
+              : () => t.id != null ? _enterSelectionMode(t.id!) : null,
+        );
+
+        if (_selectionMode) return tile;
+
         return Slidable(
           key: ValueKey('transaction_${t.id}'),
           endActionPane: ActionPane(
@@ -539,41 +663,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: typeColor.withAlpha(30),
-              child: Icon(
-                _getCategoryIcon(category?.iconName),
-                color: typeColor,
-                size: 20,
-              ),
-            ),
-            title: Text(
-              category?.name ?? '未知分类',
-              style: const TextStyle(fontWeight: FontWeight.w500),
-            ),
-            subtitle: Text(
-              '${_getTypeLabel(t.type)} · ${_formatDate(t.date)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-            trailing: Text(
-              '$prefix${_formatAmount(t.amount)}',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: typeColor,
-              ),
-            ),
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AddRecordPage(transaction: t),
-                ),
-              );
-              _loadData();
-            },
-          ),
+          child: tile,
         );
       },
     );

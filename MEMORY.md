@@ -1,0 +1,1 @@
+- [卡片化设计风格](memory/card-design-style.md) — 持仓产品信息卡设计规范，后续复用

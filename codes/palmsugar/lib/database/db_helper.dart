@@ -24,7 +24,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -88,12 +88,109 @@ class DatabaseHelper {
       )
     ''');
 
+    // 创建基金持仓表
+    await db.execute('''
+      CREATE TABLE fund_holdings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fund_name TEXT NOT NULL,
+        fund_code TEXT,
+        fund_type TEXT,
+        total_buy_amount REAL DEFAULT 0,
+        total_fee REAL DEFAULT 0,
+        total_shares REAL DEFAULT 0,
+        holding_shares REAL DEFAULT 0,
+        cost_per_share REAL,
+        current_nav REAL,
+        holding_amount REAL,
+        cost_amount REAL,
+        profit REAL,
+        profit_rate REAL,
+        is_deleted INTEGER DEFAULT 0,
+        created_at INTEGER,
+        updated_at INTEGER
+      )
+    ''');
+
+    // 创建基金交易记录表
+    await db.execute('''
+      CREATE TABLE fund_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fund_id INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('buy', 'sell', 'dividend')),
+        date INTEGER NOT NULL,
+        amount REAL,
+        fee REAL DEFAULT 0,
+        nav REAL,
+        shares REAL,
+        dividend_amount REAL,
+        synced_transaction_id INTEGER DEFAULT 0,
+        note TEXT,
+        created_at INTEGER,
+        FOREIGN KEY (fund_id) REFERENCES fund_holdings(id)
+      )
+    ''');
+
+    await db.execute(
+      'CREATE INDEX idx_fund_transactions_fund ON fund_transactions(fund_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_fund_transactions_date ON fund_transactions(date)',
+    );
+
     // 插入预设数据
     await _insertDefaultData(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // 后续版本升级逻辑
+    if (oldVersion < 2) {
+      // v1 → v2: 新增基金持仓表和交易记录表
+      await db.execute('''
+        CREATE TABLE fund_holdings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          fund_name TEXT NOT NULL,
+          fund_code TEXT,
+          fund_type TEXT,
+          total_buy_amount REAL DEFAULT 0,
+          total_fee REAL DEFAULT 0,
+          total_shares REAL DEFAULT 0,
+          holding_shares REAL DEFAULT 0,
+          cost_per_share REAL,
+          current_nav REAL,
+          holding_amount REAL,
+          cost_amount REAL,
+          profit REAL,
+          profit_rate REAL,
+          is_deleted INTEGER DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER
+        )
+      ''');
+
+      await db.execute('''
+        CREATE TABLE fund_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          fund_id INTEGER NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('buy', 'sell', 'dividend')),
+          date INTEGER NOT NULL,
+          amount REAL,
+          fee REAL DEFAULT 0,
+          nav REAL,
+          shares REAL,
+          dividend_amount REAL,
+          synced_transaction_id INTEGER DEFAULT 0,
+          note TEXT,
+          created_at INTEGER,
+          FOREIGN KEY (fund_id) REFERENCES fund_holdings(id)
+        )
+      ''');
+
+      await db.execute(
+        'CREATE INDEX idx_fund_transactions_fund ON fund_transactions(fund_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_fund_transactions_date ON fund_transactions(date)',
+      );
+    }
   }
 
   Future<void> _insertDefaultData(Database db) async {
@@ -362,6 +459,482 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query('answers', orderBy: 'id ASC');
     return maps.map((m) => Answer.fromMap(m)).toList();
+  }
+
+  // ==================== Fund Holdings CRUD ====================
+
+  Future<List<FundHolding>> getFundHoldings() async {
+    final db = await database;
+    final maps = await db.query(
+      'fund_holdings',
+      where: 'is_deleted = 0',
+      orderBy: 'id ASC',
+    );
+    return maps.map((m) => FundHolding.fromMap(m)).toList();
+  }
+
+  Future<FundHolding?> getFundHoldingById(int id) async {
+    final db = await database;
+    final maps = await db.query(
+      'fund_holdings',
+      where: 'id = ? AND is_deleted = 0',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (maps.isNotEmpty) return FundHolding.fromMap(maps.first);
+    return null;
+  }
+
+  Future<int> insertFundHolding(FundHolding holding) async {
+    final db = await database;
+    return await db.insert('fund_holdings', holding.toMap());
+  }
+
+  Future<int> updateFundHolding(FundHolding holding) async {
+    final db = await database;
+    return await db.update(
+      'fund_holdings',
+      holding.toMap(),
+      where: 'id = ?',
+      whereArgs: [holding.id],
+    );
+  }
+
+  Future<int> deleteFundHolding(int id) async {
+    final db = await database;
+    return await db.update(
+      'fund_holdings',
+      {
+        'is_deleted': 1,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ==================== Fund Transactions CRUD ====================
+
+  Future<List<FundTransaction>> getFundTransactions({
+    int? fundId,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final db = await database;
+    final where = <String>[];
+    final whereArgs = <dynamic>[];
+
+    if (fundId != null) {
+      where.add('fund_id = ?');
+      whereArgs.add(fundId);
+    }
+
+    final whereClause = where.isNotEmpty ? where.join(' AND ') : null;
+
+    final maps = await db.query(
+      'fund_transactions',
+      where: whereClause,
+      whereArgs: whereArgs.isNotEmpty ? whereArgs : null,
+      orderBy: 'date DESC, id DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return maps.map((m) => FundTransaction.fromMap(m)).toList();
+  }
+
+  /// 插入基金交易记录，自动更新持仓并同步到首页
+  Future<int> insertFundTransaction(FundTransaction ft) async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    int? syncedTxnId;
+
+    await db.transaction((txn) async {
+      // 1. 处理持仓更新
+      final holding = await _getHoldingForUpdate(txn, ft.fundId);
+      if (holding == null) throw Exception('基金不存在');
+
+      double newCostPerShare = holding.costPerShare ?? 0;
+
+      // 获取或创建指定名称、类型的分类
+      Future<int> _categoryId(String name, String type, {String icon = 'category'}) async {
+        final cats = await txn.query(
+          'categories',
+          where: "type = ? AND name = ? AND is_deleted = 0",
+          whereArgs: [type, name],
+          limit: 1,
+        );
+        if (cats.isNotEmpty) return cats.first['id'] as int;
+        return await txn.insert('categories', {
+          'parent_id': 0,
+          'name': name,
+          'type': type,
+          'icon_name': icon,
+          'sort_order': 90,
+          'is_default': 0,
+          'is_deleted': 0,
+          'created_at': now,
+          'updated_at': now,
+        });
+      }
+
+      switch (ft.type) {
+        case 'buy':
+          final buyAmount = ft.amount ?? 0; // 净投资额 = 份额 × 净值
+          final newTotalBuyAmount = holding.totalBuyAmount + buyAmount;
+          final newTotalShares = holding.totalShares + (ft.shares ?? 0);
+          final newHoldingShares =
+              holding.holdingShares + (ft.shares ?? 0);
+          newCostPerShare = newTotalShares > 0
+              ? newTotalBuyAmount / newTotalShares
+              : 0;
+          // 用本次交易净值作为当前净值
+          final newNav = ft.nav ?? holding.currentNav ?? 0;
+          final newCostAmount = newHoldingShares * newCostPerShare;
+          final newHoldingAmount = newHoldingShares * newNav;
+          await txn.update(
+            'fund_holdings',
+            {
+              'total_buy_amount': newTotalBuyAmount,
+              'total_fee': holding.totalFee + ft.fee,
+              'total_shares': newTotalShares,
+              'holding_shares': newHoldingShares,
+              'cost_per_share': newCostPerShare,
+              'current_nav': newNav,
+              'cost_amount': newCostAmount,
+              'holding_amount': newHoldingAmount,
+              'profit': newHoldingAmount - newCostAmount,
+              'profit_rate':
+                  newCostAmount > 0 ? (newHoldingAmount - newCostAmount) / newCostAmount : 0,
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [ft.fundId],
+          );
+          // 同步到首页：transfer（投资金额）+ expense（手续费）
+          syncedTxnId = await txn.insert('transactions', {
+            'type': 'transfer',
+            'amount': buyAmount,
+            'category_id': await _categoryId('投资', 'transfer', icon: 'trending_up'),
+            'date': ft.date,
+            'note': '买入 ${holding.fundName}',
+            'is_deleted': 0,
+            'created_at': now,
+            'updated_at': now,
+          });
+          if (ft.fee > 0) {
+            await txn.insert('transactions', {
+              'type': 'expense',
+              'amount': ft.fee,
+              'category_id': await _categoryId('手续费', 'expense', icon: 'receipt'),
+              'date': ft.date,
+              'note': '买入 ${holding.fundName} 手续费',
+              'is_deleted': 0,
+              'created_at': now,
+              'updated_at': now,
+            });
+          }
+          break;
+
+        case 'sell':
+          final sellShares = ft.shares ?? 0;
+          final newHoldingShares = holding.holdingShares - sellShares;
+          final grossAmount = sellShares * (ft.nav ?? 0); // 净值卖出总额
+          final costBasis = sellShares * newCostPerShare;
+          final newTotalBuyAmount =
+              holding.totalBuyAmount - costBasis;
+          final newTotalShares = holding.totalShares - sellShares;
+          // 用本次交易净值作为当前净值
+          final newNav = ft.nav ?? holding.currentNav ?? 0;
+          final newCostAmount = newHoldingShares * newCostPerShare;
+          final newHoldingAmount = newHoldingShares * newNav;
+          await txn.update(
+            'fund_holdings',
+            {
+              'total_buy_amount': newTotalBuyAmount,
+              'total_shares': newTotalShares,
+              'holding_shares': newHoldingShares,
+              'current_nav': newNav,
+              'cost_amount': newCostAmount,
+              'holding_amount': newHoldingAmount,
+              'profit': newHoldingAmount - newCostAmount,
+              'profit_rate':
+                  newCostAmount > 0 ? (newHoldingAmount - newCostAmount) / newCostAmount : 0,
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [ft.fundId],
+          );
+          // 同步到首页：transfer（卖出所得）+ expense（手续费）
+          syncedTxnId = await txn.insert('transactions', {
+            'type': 'transfer',
+            'amount': grossAmount,
+            'category_id': await _categoryId('赎回', 'transfer', icon: 'swap_horiz'),
+            'date': ft.date,
+            'note': '卖出 ${holding.fundName}',
+            'is_deleted': 0,
+            'created_at': now,
+            'updated_at': now,
+          });
+          if (ft.fee > 0) {
+            await txn.insert('transactions', {
+              'type': 'expense',
+              'amount': ft.fee,
+              'category_id': await _categoryId('手续费', 'expense', icon: 'receipt'),
+              'date': ft.date,
+              'note': '卖出 ${holding.fundName} 手续费',
+              'is_deleted': 0,
+              'created_at': now,
+              'updated_at': now,
+            });
+          }
+          break;
+
+        case 'dividend':
+          // 分红不改变持仓，只记录
+          // 同步到首页：income，分类=投资收益
+          final incomeCategory = await txn.query(
+            'categories',
+            where: "type = 'income' AND name = '投资收益' AND is_deleted = 0",
+            limit: 1,
+          );
+
+          int categoryId;
+          if (incomeCategory.isNotEmpty) {
+            categoryId = incomeCategory.first['id'] as int;
+          } else {
+            // 新建"投资收益"分类
+            categoryId = await txn.insert('categories', {
+              'parent_id': 0,
+              'name': '投资收益',
+              'type': 'income',
+              'icon_name': 'trending_up',
+              'sort_order': 100,
+              'is_default': 0,
+              'is_deleted': 0,
+              'created_at': now,
+              'updated_at': now,
+            });
+          }
+
+          syncedTxnId = await txn.insert('transactions', {
+            'type': 'income',
+            'amount': ft.dividendAmount ?? ft.amount,
+            'category_id': categoryId,
+            'date': ft.date,
+            'note': '${holding.fundName} 分红${ft.note != null ? "（${ft.note}）" : ""}',
+            'is_deleted': 0,
+            'created_at': now,
+            'updated_at': now,
+          });
+          break;
+      }
+
+      // 2. 插入基金交易记录（带上 synced_transaction_id）
+      final ftMap = ft.toMap();
+      ftMap['synced_transaction_id'] = syncedTxnId ?? 0;
+      ftMap['created_at'] = now;
+      await txn.insert('fund_transactions', ftMap);
+    });
+
+    return syncedTxnId ?? 0;
+  }
+
+  /// 删除基金交易记录，反向更新持仓并删除首页同步记录
+  Future<void> deleteFundTransaction(int id) async {
+    final db = await database;
+
+    await db.transaction((txn) async {
+      // 查找交易记录
+      final maps = await txn.query(
+        'fund_transactions',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (maps.isEmpty) return;
+      final ft = FundTransaction.fromMap(maps.first);
+
+      // 反向更新持仓（先获取，后面还要用 fundName）
+      final holding = await _getHoldingForUpdate(txn, ft.fundId);
+      if (holding == null) return;
+      final fundName = holding.fundName;
+
+      // 删除首页同步记录（transfer）
+      if (ft.syncedTransactionId > 0) {
+        await txn.delete(
+          'transactions',
+          where: 'id = ?',
+          whereArgs: [ft.syncedTransactionId],
+        );
+      }
+      // 同时删除可能的手续费 expense 记录（按日期+备注匹配）
+      if (ft.fee > 0 && ft.type != 'dividend') {
+        final typeLabel = ft.type == 'buy' ? '买入' : '卖出';
+        await txn.delete(
+          'transactions',
+          where: "type = 'expense' AND date = ? AND note = ?",
+          whereArgs: [ft.date, '$typeLabel $fundName 手续费'],
+        );
+      }
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      double newCostPerShare = holding.costPerShare ?? 0;
+
+      switch (ft.type) {
+        case 'buy':
+          final buyAmount = ft.amount ?? 0; // 净投资额（不含手续费）
+          final newTotalBuyAmount = holding.totalBuyAmount - buyAmount;
+          final newTotalShares = holding.totalShares - (ft.shares ?? 0);
+          final newHoldingShares =
+              holding.holdingShares - (ft.shares ?? 0);
+          newCostPerShare = newTotalShares > 0
+              ? newTotalBuyAmount / newTotalShares
+              : 0;
+          final newCostAmount = newHoldingShares * newCostPerShare;
+          final newHoldingAmount =
+              newHoldingShares * (holding.currentNav ?? 0);
+          await txn.update(
+            'fund_holdings',
+            {
+              'total_buy_amount': newTotalBuyAmount,
+              'total_fee': holding.totalFee - ft.fee,
+              'total_shares': newTotalShares,
+              'holding_shares': newHoldingShares,
+              'cost_per_share': newCostPerShare,
+              'cost_amount': newCostAmount,
+              'holding_amount': newHoldingAmount,
+              'profit': newHoldingAmount - newCostAmount,
+              'profit_rate':
+                  newCostAmount > 0 ? (newHoldingAmount - newCostAmount) / newCostAmount : 0,
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [ft.fundId],
+          );
+          break;
+
+        case 'sell':
+          final sellShares = ft.shares ?? 0;
+          final newHoldingShares = holding.holdingShares + sellShares;
+          final costBasis = sellShares * newCostPerShare;
+          final newTotalBuyAmount =
+              holding.totalBuyAmount + costBasis;
+          final newTotalShares = holding.totalShares + sellShares;
+          final newCostAmount = newHoldingShares * newCostPerShare;
+          final newHoldingAmount =
+              newHoldingShares * (holding.currentNav ?? 0);
+          await txn.update(
+            'fund_holdings',
+            {
+              'total_buy_amount': newTotalBuyAmount,
+              'total_shares': newTotalShares,
+              'holding_shares': newHoldingShares,
+              'cost_amount': newCostAmount,
+              'holding_amount': newHoldingAmount,
+              'profit': newHoldingAmount - newCostAmount,
+              'profit_rate':
+                  newCostAmount > 0 ? (newHoldingAmount - newCostAmount) / newCostAmount : 0,
+              'updated_at': now,
+            },
+            where: 'id = ?',
+            whereArgs: [ft.fundId],
+          );
+          break;
+
+        case 'dividend':
+          // 分红只删除同步记录（已在上面处理），不需反向更新持仓
+          break;
+      }
+
+      // 删除基金交易记录
+      await txn.delete(
+        'fund_transactions',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  /// 在事务中获取持仓（用于更新）
+  Future<FundHolding?> _getHoldingForUpdate(dynamic txn, int fundId) async {
+    final maps = await txn.query(
+      'fund_holdings',
+      where: 'id = ? AND is_deleted = 0',
+      whereArgs: [fundId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return FundHolding.fromMap(maps.first);
+  }
+
+  /// 获取投资总览
+  Future<Map<String, double>> getInvestmentSummary() async {
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT
+        COALESCE(SUM(holding_amount), 0) as total_value,
+        COALESCE(SUM(cost_amount), 0) as total_cost,
+        COALESCE(SUM(profit), 0) as total_profit
+      FROM fund_holdings
+      WHERE is_deleted = 0 AND holding_shares > 0
+    ''');
+    final row = result.first;
+    final totalCost = (row['total_cost'] as num).toDouble();
+    final totalProfit = (row['total_profit'] as num).toDouble();
+    return {
+      'total_value': (row['total_value'] as num).toDouble(),
+      'total_cost': totalCost,
+      'total_profit': totalProfit,
+      'profit_rate': totalCost > 0 ? totalProfit / totalCost : 0,
+    };
+  }
+
+  /// 更新基金净值
+  Future<void> updateFundNav(int fundId, double nav) async {
+    final db = await database;
+    final holding = await getFundHoldingById(fundId);
+    if (holding == null) return;
+
+    final holdingAmount = holding.holdingShares * nav;
+    final costAmount = holding.holdingShares * (holding.costPerShare ?? 0);
+    final profit = holdingAmount - costAmount;
+    final profitRate = costAmount > 0 ? profit / costAmount : 0;
+
+    await db.update(
+      'fund_holdings',
+      {
+        'current_nav': nav,
+        'holding_amount': holdingAmount,
+        'profit': profit,
+        'profit_rate': profitRate,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [fundId],
+    );
+  }
+
+  // ==================== Category Detail Query ====================
+
+  /// 按分类 ID 列表查询指定月份的交易记录
+  Future<List<Transaction>> getTransactionsByCategoryIds({
+    required String type,
+    required int startDate,
+    required int endDate,
+    required List<int> categoryIds,
+  }) async {
+    if (categoryIds.isEmpty) return [];
+    final db = await database;
+    final placeholders = categoryIds.map((_) => '?').join(',');
+    final maps = await db.query(
+      'transactions',
+      where:
+          'type = ? AND date >= ? AND date <= ? AND is_deleted = 0 AND category_id IN ($placeholders)',
+      whereArgs: [type, startDate, endDate, ...categoryIds],
+      orderBy: 'date DESC, id DESC',
+    );
+    return maps.map((m) => Transaction.fromMap(m)).toList();
   }
 
   // ==================== Import / Export Helpers ====================

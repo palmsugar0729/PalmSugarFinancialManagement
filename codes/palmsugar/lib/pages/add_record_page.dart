@@ -68,18 +68,31 @@ class _AddRecordPageState extends State<AddRecordPage> {
   }
 
   Future<void> _selectDate() async {
+    // 弹出前先收起键盘、清除焦点
     FocusScope.of(context).unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 1)),
     );
+
     if (picked != null) {
       setState(() {
         _selectedDate = picked;
       });
     }
+
+    // showDatePicker 关闭后 Flutter 会尝试恢复之前的焦点，
+    // 用 post-frame callback 确保在焦点恢复后再次清除
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      }
+    });
   }
 
   Future<void> _saveTransaction() async {
