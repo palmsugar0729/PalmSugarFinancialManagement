@@ -68,6 +68,7 @@ class _AddRecordPageState extends State<AddRecordPage> {
   }
 
   Future<void> _selectDate() async {
+    FocusScope.of(context).unfocus();
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
